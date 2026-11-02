@@ -35,6 +35,8 @@ public final class TaskExecutor {
     /** 执行一次完整任务。ABORTED 表示用户介入中止，不计失败。 */
     public TaskResult runOnce(Config c) {
         try {
+            // 每轮刷新滚动方向适配（用户可能刚切换了自然滚动/传统模式）
+            mouse.refreshScrollDirection();
             // 各阶段前检查真人输入：用户在任务间隙操作则立即中止，不抢焦点
             mouse.checkAbort();
             if (!activateApp(c.processName())) {
@@ -42,6 +44,11 @@ public final class TaskExecutor {
                 return TaskResult.FAILED;
             }
             sleep(rnd.nextInt(1000, 2000));
+
+            // 关闭可能展开的面板（如个人信息面板），避免遮挡界面干扰 OCR 判断
+            mouse.checkAbort();
+            mouse.pressEscape();
+            sleep(rnd.nextInt(300, 600));
 
             mouse.checkAbort();
             // 全屏截图 OCR，像素坐标按比例换算成屏幕逻辑坐标
@@ -58,42 +65,69 @@ public final class TaskExecutor {
             String[] targets = c.targetList();
             String target = targets[nextTargetIndex % targets.length];
             nextTargetIndex++;
-            List<HelperClient.OcrText> targetFound = filterByRegion(shot.texts(), target,
-                    0, 0.35 * shot.width());
-            if (targetFound.isEmpty()) {
-                Log.warn("未找到目标 [" + target + "]，跳过本轮");
-                return TaskResult.FAILED;
-            }
-            HelperClient.OcrText targetText = targetFound.get(0);
-            Log.info("点击目标 [" + targetText.text() + "] @(" + targetText.x() + "," + targetText.y() + ")");
-            mouse.checkAbort();
-            mouse.click((int) Math.round(centerX(targetText) * scaleX),
-                    (int) Math.round(centerY(targetText) * scaleY));
-            sleep(rnd.nextInt(1500, 2500));
 
-            // 点击后重截，在右侧消息区（x >= 屏宽 30%）找目标人的消息，取最下方一条
+            // 标题栏检测：当前已打开该聊天则跳过点击列表
+            // （否则可能点到消息内容上出现的同名文字，弹出框扰乱界面）
+            String title = titleText(shot);
+            if (title != null && normalize(title).contains(normalize(target))) {
+                Log.info("已在该聊天 [" + target + "]，跳过点击");
+            } else {
+                List<HelperClient.OcrText> targetFound = filterByRegion(shot.texts(), target,
+                        0, 0.35 * shot.width(), 0);
+                if (targetFound.isEmpty()) {
+                    Log.warn("未找到目标 [" + target + "]，跳过本轮");
+                    return TaskResult.FAILED;
+                }
+                HelperClient.OcrText targetText = targetFound.get(0);
+                Log.info("点击目标 [" + targetText.text() + "] @(" + targetText.x() + "," + targetText.y() + ")");
+                mouse.checkAbort();
+                mouse.click((int) Math.round(centerX(targetText) * scaleX),
+                        (int) Math.round(centerY(targetText) * scaleY));
+                sleep(rnd.nextInt(1500, 2500));
+            }
+
+            // 聊天可能停在上次离开的历史位置，先滚到最底部的最新消息
+            mouse.checkAbort();
+            mouse.moveTo((int) (screen.width * 0.65), (int) (screen.height * 0.45));
+            sleep(rnd.nextInt(200, 500));
+            Log.info("滚到最新消息");
+            mouse.returnToBottom(c.scrollBackTicks());
+            sleep(rnd.nextInt(500, 1000));
+
+            // 点击后重截，在右侧消息区（x >= 屏宽 30%，y >= 屏高 12%）找目标人的消息，取最下方一条。
+            // y 下限排除聊天标题栏的联系人名字（点击会展开个人信息面板遮挡消息区）
             if (!c.personKeyword().isEmpty()) {
                 mouse.checkAbort();
                 shot = captureFullScreen();
                 List<HelperClient.OcrText> found = filterByRegion(shot.texts(), c.personKeyword(),
-                        0.3 * shot.width(), shot.width());
+                        0.3 * shot.width(), shot.width(), 0.12 * shot.height());
                 if (found.isEmpty()) {
                     Log.warn("未找到目标人 [" + c.personKeyword() + "] 的消息，仍继续滚动");
                 } else {
                     HelperClient.OcrText person = found.stream()
                             .max(Comparator.comparingInt(HelperClient.OcrText::y)).orElse(null);
-                    Log.info("点击消息 [" + person.text() + "] @(" + person.x() + "," + person.y() + ")");
+                    // 只悬停不点击：点击消息内容会弹出操作框，扰乱界面
+                    Log.info("悬停消息 [" + person.text() + "] @(" + person.x() + "," + person.y() + ")");
                     mouse.checkAbort();
-                    mouse.click((int) Math.round(centerX(person) * scaleX),
+                    mouse.moveTo((int) Math.round(centerX(person) * scaleX),
                             (int) Math.round(centerY(person) * scaleY));
                     sleep(rnd.nextInt(500, 1000));
                 }
             }
 
+            // 滚轮作用于鼠标悬停区域：先把鼠标拟人移到右侧消息区，否则滚的是联系人列表
+            mouse.checkAbort();
+            mouse.moveTo((int) (screen.width * 0.65), (int) (screen.height * 0.45));
+            sleep(rnd.nextInt(200, 500));
+
             mouse.checkAbort();
             int scrollSeconds = rnd.nextInt(c.scrollMinSeconds(), c.scrollMaxSeconds() + 1);
             Log.info("拟人滚动 " + scrollSeconds + " 秒");
             mouse.humanScroll(scrollSeconds);
+
+            // 滚动会翻到历史位置，结束后拉回底部清除未读（红点/数量）
+            Log.info("回到底部清除未读");
+            mouse.returnToBottom(c.scrollBackTicks());
             return TaskResult.SUCCESS;
         } catch (UserActiveException e) {
             Log.info(e.getMessage() + "，本轮中止");
@@ -135,10 +169,11 @@ public final class TaskExecutor {
     }
 
     private List<HelperClient.OcrText> filterByRegion(List<HelperClient.OcrText> texts, String keyword,
-                                                      double xMin, double xMax) {
+                                                      double xMin, double xMax, double yMin) {
         String normKeyword = normalize(keyword);
         return texts.stream()
                 .filter(t -> t.x() >= xMin && t.x() <= xMax)
+                .filter(t -> t.y() >= yMin)
                 .filter(t -> normalize(t.text()).contains(normKeyword))
                 .sorted(Comparator.comparingInt(HelperClient.OcrText::y))
                 .toList();
@@ -147,6 +182,17 @@ public final class TaskExecutor {
     /** OCR 常把数字与汉字间加空格（如"2607 班"），匹配时忽略所有空格。 */
     private static String normalize(String s) {
         return s.replace(" ", "");
+    }
+
+    /** 提取聊天标题栏文字：屏幕顶部 12% 且右侧 25% 宽的区域，拼接所有 OCR 文本。 */
+    private String titleText(Shot shot) {
+        StringBuilder sb = new StringBuilder();
+        for (HelperClient.OcrText t : shot.texts()) {
+            if (t.y() < 0.12 * shot.height() && t.x() >= 0.25 * shot.width()) {
+                sb.append(t.text());
+            }
+        }
+        return sb.length() == 0 ? null : sb.toString();
     }
 
     private static int centerX(HelperClient.OcrText t) {

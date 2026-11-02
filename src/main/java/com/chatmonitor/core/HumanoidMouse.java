@@ -1,5 +1,7 @@
 package com.chatmonitor.core;
 
+import com.chatmonitor.util.Log;
+
 import java.awt.AWTException;
 import java.awt.MouseInfo;
 import java.awt.Point;
@@ -20,11 +22,42 @@ public final class HumanoidMouse {
     private final MouseActivityMonitor monitor;
     private final ThreadLocalRandom rnd = ThreadLocalRandom.current();
     private volatile long taskStartedAt = 0;
+    /** 滚动方向系数：自然滚动=1，传统模式=-1，保证 scrollDown 始终是"往下拉滚动条看最新"。 */
+    private volatile int scrollCoeff = 1;
 
     public HumanoidMouse(MouseActivityMonitor monitor) throws AWTException {
         this.monitor = monitor;
         this.robot = new Robot();
         robot.setAutoDelay(0);
+        refreshScrollDirection();
+    }
+
+    /** 读取 macOS 滚动方式设置（自然滚动/传统模式），自动适配滚动方向。设置变化时打印日志。 */
+    public void refreshScrollDirection() {
+        try {
+            Process p = new ProcessBuilder("defaults", "read", "-g", "com.apple.swipescrolldirection").start();
+            String out = new String(p.getInputStream().readAllBytes()).trim();
+            p.waitFor();
+            int coeff = ("1".equals(out) || "true".equalsIgnoreCase(out)) ? 1 : -1;
+            if (coeff != scrollCoeff) {
+                scrollCoeff = coeff;
+                Log.info("滚动方向设置: " + (coeff == 1
+                        ? "自然滚动（已适配：往下拉看最新）"
+                        : "传统模式（已自动反转）"));
+            }
+        } catch (Exception e) {
+            Log.warn("读取滚动设置失败，使用默认方向: " + e.getMessage());
+        }
+    }
+
+    /** 向下滚动一格 = 往下拉滚动条（向最新消息）。 */
+    private void scrollDownOne() {
+        robot.mouseWheel(scrollCoeff);
+    }
+
+    /** 向上滚动一格 = 往上拉滚动条（向历史消息）。 */
+    private void scrollUpOne() {
+        robot.mouseWheel(-scrollCoeff);
     }
 
     /** 记录本轮任务开始时刻，用于判定任务期间用户的介入。 */
@@ -79,23 +112,47 @@ public final class HumanoidMouse {
         }
     }
 
-    /** 模拟人阅读式滚动：分段变速滚动，段落间随机停顿（停顿期间不占控制权），偶尔小幅回滚。 */
+    /** 按 Esc 关闭可能展开的面板（个人信息面板、选中态等）。 */
+    public void pressEscape() {
+        monitor.beginProgramControl();
+        try {
+            robot.keyPress(java.awt.event.KeyEvent.VK_ESCAPE);
+            sleep(rnd.nextInt(40, 90));
+            robot.keyRelease(java.awt.event.KeyEvent.VK_ESCAPE);
+        } finally {
+            monitor.endProgramControl();
+        }
+    }
+
+    /** 模拟人阅读式滚动：分段变速滚动，混合翻阅历史（向上）与看新消息（向下），段落间随机停顿。 */
     public void humanScroll(int totalSeconds) {
         long deadline = System.currentTimeMillis() + totalSeconds * 1000L;
         while (System.currentTimeMillis() < deadline) {
             checkAbort();
             monitor.beginProgramControl();
             try {
+                // 70% 概率向上翻阅历史，30% 向下看新消息
+                boolean up = rnd.nextInt(10) < 7;
                 // 每段滚 2~6 格
                 int ticks = rnd.nextInt(2, 7);
                 for (int i = 0; i < ticks; i++) {
                     checkAbort();
-                    robot.mouseWheel(1);
+                    if (up) {
+                        scrollUpOne();
+                    } else {
+                        scrollDownOne();
+                    }
                     sleep(rnd.nextInt(60, 200));
                 }
-                // 10% 概率往回翻一小段（人阅读时的回看行为）
+                // 10% 概率反向回一小段（人阅读时的回看行为）
                 if (rnd.nextInt(10) == 0) {
-                    robot.mouseWheel(-rnd.nextInt(2, 5));
+                    for (int i = 0; i < rnd.nextInt(2, 5); i++) {
+                        if (up) {
+                            scrollDownOne();
+                        } else {
+                            scrollUpOne();
+                        }
+                    }
                     sleep(rnd.nextInt(200, 500));
                 }
             } finally {
@@ -103,6 +160,28 @@ public final class HumanoidMouse {
             }
             // 阅读停顿（此时若用户动鼠标，下一段 checkAbort 会中止）
             sleep(rnd.nextInt(300, 1800));
+        }
+    }
+
+    /** 快速滚回聊天底部（最新消息），清除未读状态——模拟人看完历史拉回最新。 */
+    public void returnToBottom(int totalTicks) {
+        // 分 8 段快速向下滚，速度比浏览滚动快
+        int segs = 8;
+        int perSeg = Math.max(1, totalTicks / segs);
+        for (int seg = 0; seg < segs; seg++) {
+            checkAbort();
+            monitor.beginProgramControl();
+            try {
+                for (int i = 0; i < perSeg; i++) {
+                    checkAbort();
+                    scrollDownOne();
+                    sleep(rnd.nextInt(20, 50));
+                }
+            } finally {
+                monitor.endProgramControl();
+            }
+            checkAbort();
+            sleep(rnd.nextInt(150, 400));
         }
     }
 

@@ -82,8 +82,8 @@ public final class MouseActivityMonitor {
                     String line;
                     while ((line = br.readLine()) != null) {
                         String event = line.trim();
-                        // 按键一定是真人（程序不敲键盘）；滚轮/点击在程序自控期间过滤
-                        if ("k".equals(event) || ((("s".equals(event) || "c".equals(event))) && !programControlled)) {
+                        // 程序自控期间（滚动/点击/按 Esc）过滤其自产事件；其余均为真人输入
+                        if (!programControlled && ("k".equals(event) || "s".equals(event) || "c".equals(event))) {
                             lastHumanInput = System.currentTimeMillis();
                         }
                     }
