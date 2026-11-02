@@ -1,0 +1,65 @@
+# ===== Java 基础 =====
+# 编译后的 class 文件
+*.class
+# 打包文件
+*.jar
+*.war
+*.ear
+*.nar
+# 虚拟机崩溃日志
+hs_err_pid*
+replay_pid*
+# BlueJ 文件
+*.ctxt
+# J2ME
+.mtj.tmp/
+
+# ===== 日志 =====
+*.log
+
+# ===== Maven =====
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+# 保留 Maven Wrapper 的 jar（通常需要提交）
+!/.mvn/wrapper/maven-wrapper.jar
+
+# ===== Gradle =====
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ===== IntelliJ IDEA =====
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# ===== Eclipse =====
+.settings/
+.project
+.classpath
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.loadpath
+.factorypath
+
+# ===== VS Code =====
+.vscode/
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db

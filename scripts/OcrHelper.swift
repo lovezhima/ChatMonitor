@@ -4,7 +4,8 @@ import CoreGraphics
 import AppKit
 
 // 子命令:
-//   list <owner>        列出 owner 匹配的窗口: windowId|x|y|w|h|title
+//   list [owner]        列出窗口（owner 可选过滤）: windowId|pid|x|y|w|h|owner|title
+//   frontwindow <pid>   应用当前聚焦窗口 bounds: x|y|w|h（点坐标，失败无输出）
 //   ocr <png>           对图片做 OCR: x|y|w|h|text (像素坐标)
 //   locked              检测锁屏: true/false
 //   accessibility       检测辅助功能权限: true/false
@@ -17,22 +18,42 @@ func printUsage() -> Never {
     exit(2)
 }
 
-func cmdList(_ owner: String) {
+func cmdList(_ owner: String?) {
     let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
     guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
         exit(1)
     }
     for info in infos {
-        guard let ownerName = info[kCGWindowOwnerName as String] as? String,
-              ownerName.lowercased().contains(owner.lowercased()) else { continue }
+        if let owner = owner {
+            guard let ownerName = info[kCGWindowOwnerName as String] as? String,
+                  ownerName.lowercased().contains(owner.lowercased()) else { continue }
+        }
         guard let num = info[kCGWindowNumber as String] as? Int,
+              let pid = info[kCGWindowOwnerPID as String] as? Int,
               let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
               let x = boundsDict["X"] as? Double, let y = boundsDict["Y"] as? Double,
               let w = boundsDict["Width"] as? Double, let h = boundsDict["Height"] as? Double else { continue }
+        let ownerName = (info[kCGWindowOwnerName as String] as? String) ?? ""
         let title = (info[kCGWindowName as String] as? String) ?? ""
-        let safeTitle = title.replacingOccurrences(of: "|", with: " ").replacingOccurrences(of: "\n", with: " ")
-        print("\(num)|\(Int(x))|\(Int(y))|\(Int(w))|\(Int(h))|\(safeTitle)")
+        let safe = { (s: String) in s.replacingOccurrences(of: "|", with: " ").replacingOccurrences(of: "\n", with: " ") }
+        print("\(num)|\(pid)|\(Int(x))|\(Int(y))|\(Int(w))|\(Int(h))|\(safe(ownerName))|\(safe(title))")
     }
+}
+
+func cmdFrontWindow(_ pid: Int32) {
+    let app = AXUIElementCreateApplication(pid)
+    var winRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &winRef) == .success else { return }
+    guard let win = winRef else { return }
+    var posRef: CFTypeRef?
+    var sizeRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(win as! AXUIElement, kAXPositionAttribute as CFString, &posRef) == .success,
+          AXUIElementCopyAttributeValue(win as! AXUIElement, kAXSizeAttribute as CFString, &sizeRef) == .success else { return }
+    var pos = CGPoint.zero
+    var size = CGSize.zero
+    AXValueGetValue(posRef as! AXValue, .cgPoint, &pos)
+    AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+    print("\(Int(pos.x))|\(Int(pos.y))|\(Int(size.width))|\(Int(size.height))")
 }
 
 func cmdOcr(_ pngPath: String) {
@@ -141,8 +162,10 @@ let args = CommandLine.arguments
 guard args.count >= 2 else { printUsage() }
 switch args[1] {
 case "list":
-    guard args.count >= 3 else { printUsage() }
-    cmdList(args[2])
+    cmdList(args.count >= 3 ? args[2] : nil)
+case "frontwindow":
+    guard args.count >= 3, let pid = Int32(args[2]) else { printUsage() }
+    cmdFrontWindow(pid)
 case "ocr":
     guard args.count >= 3 else { printUsage() }
     cmdOcr(args[2])

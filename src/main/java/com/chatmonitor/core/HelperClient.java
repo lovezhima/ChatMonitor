@@ -12,8 +12,8 @@ import java.util.concurrent.TimeUnit;
 /** 调用 swift 编译的 ocr_helper 二进制，输出为 "|" 分隔的行协议。 */
 public final class HelperClient {
 
-    /** 窗口信息，坐标为主屏幕像素。 */
-    public record Window(int windowId, int x, int y, int width, int height, String title) {}
+    /** 窗口信息，坐标为屏幕点坐标（与 Robot 坐标系一致）。 */
+    public record Window(int windowId, int pid, int x, int y, int width, int height, String owner, String title) {}
 
     /** OCR 文本块，坐标为图片像素。 */
     public record OcrText(int x, int y, int width, int height, String text) {}
@@ -24,20 +24,39 @@ public final class HelperClient {
         this.helperPath = helperPath;
     }
 
-    public List<Window> listWindows(String owner) throws IOException, InterruptedException {
-        List<String> lines = run("list", owner);
+    /** 列出所有在屏窗口（含 pid/owner，供 Java 端按进程过滤）。 */
+    public List<Window> listWindows() throws IOException, InterruptedException {
+        List<String> lines = run("list");
         List<Window> windows = new ArrayList<>();
         for (String line : lines) {
-            String[] f = line.split("\\|", 6);
-            if (f.length < 6) continue;
+            String[] f = line.split("\\|", 8);
+            if (f.length < 8) continue;
             try {
                 windows.add(new Window(Integer.parseInt(f[0]), Integer.parseInt(f[1]),
-                        Integer.parseInt(f[2]), Integer.parseInt(f[3]), Integer.parseInt(f[4]), f[5]));
+                        Integer.parseInt(f[2]), Integer.parseInt(f[3]), Integer.parseInt(f[4]),
+                        Integer.parseInt(f[5]), f[6], f[7]));
             } catch (NumberFormatException ignored) {
             }
         }
         return windows;
     }
+
+    /** 应用当前聚焦窗口 bounds（屏幕点坐标），拿不到返回 null。 */
+    public Rect frontWindow(long pid) throws IOException, InterruptedException {
+        List<String> lines = run("frontwindow", String.valueOf(pid));
+        if (lines.isEmpty()) return null;
+        String[] f = lines.get(0).trim().split("\\|", 4);
+        if (f.length < 4) return null;
+        try {
+            return new Rect(Integer.parseInt(f[0]), Integer.parseInt(f[1]),
+                    Integer.parseInt(f[2]), Integer.parseInt(f[3]));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 屏幕点坐标矩形。 */
+    public record Rect(int x, int y, int width, int height) {}
 
     public List<OcrText> ocr(String pngPath) throws IOException, InterruptedException {
         List<String> lines = run("ocr", pngPath);

@@ -6,6 +6,7 @@ import com.chatmonitor.util.Log;
 
 import javax.imageio.ImageIO;
 import java.awt.Dimension;
+import java.awt.Point;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -50,6 +51,25 @@ public final class TaskExecutor {
             mouse.pressEscape();
             sleep(rnd.nextInt(300, 600));
 
+            // 按顺序轮流切换下一个目标（round-robin），在屏幕左侧 35% 区域找，取最上方一条
+            String[] targets = c.targetList();
+            String target = targets[nextTargetIndex % targets.length];
+            nextTargetIndex++;
+
+            // 目标应用窗口 bounds（屏幕点坐标），用于把鼠标定位到其消息区
+            HelperClient.Window chatWin = null;
+            try {
+                chatWin = findChatWindow(c);
+            } catch (Exception e) {
+                Log.warn("获取窗口位置失败，退回全屏定位: " + e.getMessage());
+            }
+            if (chatWin == null) {
+                Log.warn("未找到窗口 [" + c.processName() + "]，退回全屏定位");
+            } else {
+                Log.info("窗口 [" + chatWin.owner() + "] @(" + chatWin.x() + "," + chatWin.y() + ") "
+                        + chatWin.width() + "x" + chatWin.height());
+            }
+
             mouse.checkAbort();
             // 全屏截图 OCR，像素坐标按比例换算成屏幕逻辑坐标
             Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
@@ -60,11 +80,6 @@ public final class TaskExecutor {
             }
             double scaleX = screen.width / (double) shot.width();
             double scaleY = screen.height / (double) shot.height();
-
-            // 按顺序轮流切换下一个目标（round-robin），在屏幕左侧 35% 区域找，取最上方一条
-            String[] targets = c.targetList();
-            String target = targets[nextTargetIndex % targets.length];
-            nextTargetIndex++;
 
             // 标题栏检测：当前已打开该聊天则跳过点击列表
             // （否则可能点到消息内容上出现的同名文字，弹出框扰乱界面）
@@ -88,7 +103,9 @@ public final class TaskExecutor {
 
             // 聊天可能停在上次离开的历史位置，先滚到最底部的最新消息
             mouse.checkAbort();
-            mouse.moveTo((int) (screen.width * 0.65), (int) (screen.height * 0.45));
+            Point msgArea = messageArea(chatWin, screen);
+            Log.info("消息区落点 @(" + msgArea.x + "," + msgArea.y + ")");
+            mouse.moveTo(msgArea.x, msgArea.y);
             sleep(rnd.nextInt(200, 500));
             Log.info("滚到最新消息");
             mouse.returnToBottom(c.scrollBackTicks());
@@ -117,7 +134,7 @@ public final class TaskExecutor {
 
             // 滚轮作用于鼠标悬停区域：先把鼠标拟人移到右侧消息区，否则滚的是联系人列表
             mouse.checkAbort();
-            mouse.moveTo((int) (screen.width * 0.65), (int) (screen.height * 0.45));
+            mouse.moveTo(msgArea.x, msgArea.y);
             sleep(rnd.nextInt(200, 500));
 
             mouse.checkAbort();
@@ -147,6 +164,37 @@ public final class TaskExecutor {
                 .map(cmd -> cmd.substring(0, cmd.indexOf(".app/") + 4))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /** 目标应用在屏幕上的聊天窗口（点坐标）：优先应用当前聚焦窗口，退回按 PID 取面积最大；找不到返回 null。 */
+    private HelperClient.Window findChatWindow(Config c) throws IOException, InterruptedException {
+        // 按进程 PID 匹配窗口（窗口 owner 显示名可能是本地化名称，如微信显示"微信"）
+        java.util.Set<Long> pids = ProcessHandle.allProcesses()
+                .filter(ph -> ph.info().command().orElse("").toLowerCase()
+                        .endsWith("/" + c.processName().toLowerCase()))
+                .map(ProcessHandle::pid)
+                .collect(java.util.stream.Collectors.toSet());
+        // 应用刚被激活，聚焦窗口就是聊天主窗口（准确排除图片预览等浮窗）
+        for (long pid : pids) {
+            HelperClient.Rect r = helper.frontWindow(pid);
+            if (r != null && r.width() > 50 && r.height() > 50) {
+                return new HelperClient.Window(0, (int) pid, r.x(), r.y(), r.width(), r.height(), c.processName(), "");
+            }
+        }
+        // 回退：该进程的所有在屏窗口取面积最大
+        return helper.listWindows().stream()
+                .filter(w -> pids.contains((long) w.pid()))
+                .max(Comparator.comparingInt(w -> w.width() * w.height()))
+                .orElse(null);
+    }
+
+    /** 消息区落点：窗口内右侧 65% 宽、45% 高处；窗口未知时退回全屏比例。 */
+    private static Point messageArea(HelperClient.Window win, Dimension screen) {
+        if (win != null) {
+            return new Point(win.x() + (int) (win.width() * 0.65),
+                    win.y() + (int) (win.height() * 0.45));
+        }
+        return new Point((int) (screen.width * 0.65), (int) (screen.height * 0.45));
     }
 
     private boolean activateApp(String processName) throws IOException, InterruptedException {
