@@ -6,6 +6,7 @@ import AppKit
 // 子命令:
 //   list [owner]        列出窗口（owner 可选过滤）: windowId|pid|x|y|w|h|owner|title
 //   frontwindow <pid>   应用当前聚焦窗口 bounds: x|y|w|h（点坐标，失败无输出）
+//   minimize <pid>      最小化应用当前聚焦窗口（失败静默）
 //   ocr <png>           对图片做 OCR: x|y|w|h|text (像素坐标)
 //   locked              检测锁屏: true/false
 //   accessibility       检测辅助功能权限: true/false
@@ -54,6 +55,14 @@ func cmdFrontWindow(_ pid: Int32) {
     AXValueGetValue(posRef as! AXValue, .cgPoint, &pos)
     AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
     print("\(Int(pos.x))|\(Int(pos.y))|\(Int(size.width))|\(Int(size.height))")
+}
+
+func cmdMinimize(_ pid: Int32) {
+    let app = AXUIElementCreateApplication(pid)
+    var winRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
+          let win = winRef else { return }
+    AXUIElementSetAttributeValue(win as! AXUIElement, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
 }
 
 func cmdOcr(_ pngPath: String) {
@@ -166,6 +175,9 @@ case "list":
 case "frontwindow":
     guard args.count >= 3, let pid = Int32(args[2]) else { printUsage() }
     cmdFrontWindow(pid)
+case "minimize":
+    guard args.count >= 3, let pid = Int32(args[2]) else { printUsage() }
+    cmdMinimize(pid)
 case "ocr":
     guard args.count >= 3 else { printUsage() }
     cmdOcr(args[2])

@@ -166,14 +166,19 @@ public final class TaskExecutor {
                 .orElse(null);
     }
 
-    /** 目标应用在屏幕上的聊天窗口（点坐标）：优先应用当前聚焦窗口，退回按 PID 取面积最大；找不到返回 null。 */
-    private HelperClient.Window findChatWindow(Config c) throws IOException, InterruptedException {
-        // 按进程 PID 匹配窗口（窗口 owner 显示名可能是本地化名称，如微信显示"微信"）
-        java.util.Set<Long> pids = ProcessHandle.allProcesses()
+    /** 目标应用的进程 PID 集合（进程 command 末尾匹配进程名）。 */
+    private java.util.Set<Long> targetPids(Config c) {
+        return ProcessHandle.allProcesses()
                 .filter(ph -> ph.info().command().orElse("").toLowerCase()
                         .endsWith("/" + c.processName().toLowerCase()))
                 .map(ProcessHandle::pid)
                 .collect(java.util.stream.Collectors.toSet());
+    }
+
+    /** 目标应用在屏幕上的聊天窗口（点坐标）：优先应用当前聚焦窗口，退回按 PID 取面积最大；找不到返回 null。 */
+    private HelperClient.Window findChatWindow(Config c) throws IOException, InterruptedException {
+        // 按进程 PID 匹配窗口（窗口 owner 显示名可能是本地化名称，如微信显示"微信"）
+        java.util.Set<Long> pids = targetPids(c);
         // 应用刚被激活，聚焦窗口就是聊天主窗口（准确排除图片预览等浮窗）
         for (long pid : pids) {
             HelperClient.Rect r = helper.frontWindow(pid);
@@ -186,6 +191,18 @@ public final class TaskExecutor {
                 .filter(w -> pids.contains((long) w.pid()))
                 .max(Comparator.comparingInt(w -> w.width() * w.height()))
                 .orElse(null);
+    }
+
+    /** 任务完成后最小化聊天窗口（失败仅告警，不影响主流程）。 */
+    public void minimizeChat(Config c) {
+        try {
+            for (long pid : targetPids(c)) {
+                helper.minimize(pid);
+                return;
+            }
+        } catch (Exception e) {
+            Log.warn("最小化窗口失败: " + e.getMessage());
+        }
     }
 
     /** 消息区落点：窗口内右侧 65% 宽、45% 高处；窗口未知时退回全屏比例。 */

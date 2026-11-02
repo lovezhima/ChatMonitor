@@ -55,6 +55,11 @@ public final class HelperClient {
         }
     }
 
+    /** 最小化应用当前聚焦窗口。 */
+    public void minimize(long pid) throws IOException, InterruptedException {
+        run("minimize", String.valueOf(pid));
+    }
+
     /** 屏幕点坐标矩形。 */
     public record Rect(int x, int y, int width, int height) {}
 

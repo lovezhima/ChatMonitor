@@ -46,6 +46,8 @@ public final class Main {
 
         long totalRuns = 0, successRuns = 0, abortedRuns = 0;
         long lastHintedRemain = -1;
+        long lastSwitchAt = System.currentTimeMillis();
+        long lastAlertAt = 0;
         while (running.get()) {
             configManager.reloadIfChanged();
             Config c = configManager.get();
@@ -87,6 +89,16 @@ public final class Main {
                     Log.info("等待闲置接管，还剩 " + remain + " 秒");
                 }
                 lastHintedRemain = remain;
+                // 用户持续操作超过目标切换时间仍未切换，发出告警；之后每 15 秒重复提醒一次，直到切换成功
+                long elapsed = (System.currentTimeMillis() - lastSwitchAt) / 1000L;
+                long now = System.currentTimeMillis();
+                if (c.switchAlertSeconds() > 0 && elapsed > c.switchAlertSeconds()
+                        && (lastAlertAt == 0 || now - lastAlertAt >= 15_000L)) {
+                    lastAlertAt = now;
+                    Log.warn("超过目标切换时间 " + c.switchAlertSeconds() + " 秒仍未切换目标，请暂停操作让程序接管");
+                    sendNotification("ChatMonitor 告警", "超过目标切换时间仍未切换，请暂停操作片刻");
+                    playAlertSound();
+                }
                 sleep(1000);
                 continue;
             }
@@ -106,6 +118,9 @@ public final class Main {
                     guard.record(true);
                     totalRuns++;
                     successRuns++;
+                    // 真正切换成功才重置告警计时（中止/失败不重置，持续提醒）
+                    lastSwitchAt = System.currentTimeMillis();
+                    lastAlertAt = 0;
                 }
                 case FAILED -> {
                     guard.record(false);
@@ -114,6 +129,11 @@ public final class Main {
                 case ABORTED -> abortedRuns++;
             }
             Log.info("===== 本轮结束（成功 " + successRuns + "/" + totalRuns + "，中止 " + abortedRuns + "）=====");
+
+            // 操作完后最小化聊天窗口（用户介入中止时不最小化，避免干扰用户）
+            if (result != TaskResult.ABORTED) {
+                executor.minimizeChat(c);
+            }
 
             // 无固定间隔：回到循环顶部，等闲置 idleSeconds 后自动切换下一个目标
         }
@@ -139,6 +159,24 @@ public final class Main {
             }
         } catch (IOException | InterruptedException e) {
             Log.warn("权限检测失败: " + e.getMessage());
+        }
+    }
+
+    /** 发送 macOS 系统通知（失败静默，日志告警始终有）。 */
+    private static void sendNotification(String title, String msg) {
+        try {
+            new ProcessBuilder("osascript", "-e",
+                    "display notification \"" + msg + "\" with title \"" + title + "\"").start();
+        } catch (IOException ignored) {
+        }
+    }
+
+    /** 播放系统提示音（afplay 提示音 + 系统蜂鸣，后台不阻塞；失败静默，日志告警始终有）。 */
+    private static void playAlertSound() {
+        try {
+            new ProcessBuilder("afplay", "/System/Library/Sounds/Sosumi.aiff").start();
+            new ProcessBuilder("osascript", "-e", "beep 3").start();
+        } catch (IOException ignored) {
         }
     }
 
