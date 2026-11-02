@@ -48,6 +48,7 @@ public final class Main {
         long lastHintedRemain = -1;
         long lastSwitchAt = System.currentTimeMillis();
         long lastAlertAt = 0;
+        int alertCount = 0;
         while (running.get()) {
             configManager.reloadIfChanged();
             Config c = configManager.get();
@@ -89,14 +90,16 @@ public final class Main {
                     Log.info("等待闲置接管，还剩 " + remain + " 秒");
                 }
                 lastHintedRemain = remain;
-                // 用户持续操作超过目标切换时间仍未切换，发出告警；之后每 15 秒重复提醒一次，直到切换成功
+                // 用户持续操作超过目标切换时间仍未切换，发出告警；每 15 秒重复一次，最多 3 次后关闭（切换成功重置）
                 long elapsed = (System.currentTimeMillis() - lastSwitchAt) / 1000L;
                 long now = System.currentTimeMillis();
-                if (c.switchAlertSeconds() > 0 && elapsed > c.switchAlertSeconds()
+                if (c.switchAlertSeconds() > 0 && alertCount < 3 && elapsed > c.switchAlertSeconds()
                         && (lastAlertAt == 0 || now - lastAlertAt >= 15_000L)) {
                     lastAlertAt = now;
-                    Log.warn("超过目标切换时间 " + c.switchAlertSeconds() + " 秒仍未切换目标，请暂停操作让程序接管");
-                    sendNotification("ChatMonitor 告警", "超过目标切换时间仍未切换，请暂停操作片刻");
+                    alertCount++;
+                    Log.warn("超过目标切换时间 " + c.switchAlertSeconds() + " 秒仍未切换目标，请暂停操作让程序接管（提醒 "
+                            + alertCount + "/3）");
+                    sendNotification("ChatMonitor 告警", "超过目标切换时间仍未切换，请暂停操作片刻（" + alertCount + "/3）");
                     playAlertSound();
                 }
                 sleep(1000);
@@ -121,6 +124,7 @@ public final class Main {
                     // 真正切换成功才重置告警计时（中止/失败不重置，持续提醒）
                     lastSwitchAt = System.currentTimeMillis();
                     lastAlertAt = 0;
+                    alertCount = 0;
                 }
                 case FAILED -> {
                     guard.record(false);
