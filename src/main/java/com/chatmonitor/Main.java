@@ -87,7 +87,7 @@ public final class Main {
                     Log.info("等待闲置接管，还剩 " + remain + " 秒");
                 }
                 lastHintedRemain = remain;
-                sleep(500);
+                sleep(1000);
                 continue;
             }
             lastHintedRemain = -1;
