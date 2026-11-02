@@ -31,6 +31,11 @@ Swift 编译的 `ocr_helper`（Vision OCR / 窗口查询 / 锁屏与权限检测
 ./build.sh
 ```
 
+> 跨机器部署注意：`bin/ocr_helper` 是平台相关二进制（Swift 编译，targeting macOS 13.0+）。
+> 拷到另一台 Mac 后，若架构相同（都是 Apple Silicon 或都是 Intel）可直接运行；
+> 若架构不同或遇到 `dyld: Library not loaded` 错误，在该机器上重跑 `./build.sh`
+> （需要 Xcode Command Line Tools：`xcode-select --install`）。Java 部分（bin/classes）跨平台通用。
+
 ### 2. 授予系统权限（各一次）
 
 程序启动时会检测并自动打开对应设置面板，把运行程序的**终端应用**（如 Terminal / iTerm2 / IDEA）勾选上：
