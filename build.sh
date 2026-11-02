@@ -15,4 +15,7 @@ rm -rf bin/classes
 mkdir -p bin/classes
 javac -encoding UTF-8 -d bin/classes $(find src/main/java -name '*.java')
 
+echo "==> 打包 chatmonitor.jar"
+jar cfe bin/chatmonitor.jar com.chatmonitor.Main -C bin/classes .
+
 echo "==> 构建完成"

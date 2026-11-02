@@ -45,7 +45,7 @@ public final class Main {
         }));
 
         long totalRuns = 0, successRuns = 0, abortedRuns = 0;
-        boolean idleHinted = false;
+        long lastHintedRemain = -1;
         while (running.get()) {
             configManager.reloadIfChanged();
             Config c = configManager.get();
@@ -81,14 +81,16 @@ public final class Main {
                 continue;
             }
             if (sysIdle < c.idleSeconds() || !monitor.idleFor(c.idleSeconds() * 1000L)) {
-                if (!idleHinted) {
-                    Log.info("等待闲置 " + c.idleSeconds() + " 秒后接管...");
-                    idleHinted = true;
+                // 剩余秒数变化时动态打印倒计时
+                long remain = c.idleSeconds() - sysIdle;
+                if (remain > 0 && remain != lastHintedRemain) {
+                    Log.info("等待闲置接管，还剩 " + remain + " 秒");
                 }
+                lastHintedRemain = remain;
                 sleep(500);
                 continue;
             }
-            idleHinted = false;
+            lastHintedRemain = -1;
 
             long backoff = guard.backoffMillis(c);
             if (backoff > 0) {
